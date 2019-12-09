@@ -115,19 +115,18 @@ if($numRows>0)
 			echo $doc_info;
 			echo '<br>';
 			//update doc_info in db
-			parse_doc_info($conn, $row['ID'], $doc_info);
+			$parsed=parse_doc_info($doc_info);
+			db_update_parsed_doc_info($conn, $row['ID'], $parsed);
 		}
 		//echo $doc_info;
-		echo '</td></tr>';
+		echo '</td>';
 		print "</tr> \n";
 	}
 	print '	</tbody>
 	</table>';
 }
 
-function parse_doc_info($conn, $id, $doc_info){
-	$classname='cats';
-	
+function parse_doc_info($doc_info){
 	//dirty hack for set charset
 	$doc_info='<html><head>
 	<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
@@ -140,13 +139,15 @@ function parse_doc_info($conn, $id, $doc_info){
 	libxml_use_internal_errors(true);
 	$doc->loadHTML($doc_info); // loads your HTML
 	$xpath = new DOMXPath($doc);
+	
+	$classname='cats';
 	// returns a list
 	$nlist = $xpath->query("//div[@class='".$classname."']");
 
 	if(!$nlist->length){
 		if($debug)
 			echo "class=$classname not found<br>";
-		return '';
+		return;
 	}
 
 	$parsed=array();
@@ -158,7 +159,7 @@ function parse_doc_info($conn, $id, $doc_info){
 			list($field, $value) = explode(':', $text);
 			$field=trim($field);
 			$value=trim($value);
-			echo "$field:$value<br>";
+			//echo "$field:$value<br>";
 			
 			if($field=='Должность')
 				$parsed['DOLGNOST']=$value;
@@ -173,19 +174,89 @@ function parse_doc_info($conn, $id, $doc_info){
 		}		
 	}
 	
-	$nlist = $xpath->query("//p");
-	
-	if($nlist->length==2 &&
-		is_a($nlist->item(0),'DOMElement') &&
-		is_a($nlist->item(1),'DOMElement') &&
-		trim($nlist->item(0)->nodeValue)=='Профессиональные и научные достижения:' 
-		)
-	{
-		$parsed['DOSTIGENIA']=DOMinnerHTML($nlist->item(1));	
+	if(0){
+		//doesn't work with all input data variants
+		$nlist = $xpath->query("//p");
+		
+		if($nlist->length>1 &&
+			is_a($nlist->item(0),'DOMElement') &&
+			//is_a($nlist->item(1),'DOMElement') &&
+			trim($nlist->item(0)->nodeValue)=='Профессиональные и научные достижения:' 
+			)
+		{
+			$cur_node=$nlist->item(1);
+			while($cur_node->nextSibling){
+				$parsed['DOSTIGENIA'].=DOMinnerHTML($cur_node);
+				$cur_node=$cur_node->nextSibling;
+			}
+		}
 	}
-	
+	if(1){
+		//alter variant
+		//$doc_info;
+		$delim="Профессиональные и научные достижения:";
+		$pos=strripos($doc_info, $delim);
+		if($pos){
+			$parsed['DOSTIGENIA']=substr($doc_info,$pos);
+		}
+		//отрезаем тег от заголовка
+		if(isset($parsed['DOSTIGENIA']) && strlen($parsed['DOSTIGENIA'])){
+			$delim="</p>";
+			$pos=stripos($parsed['DOSTIGENIA'], $delim);
+			if($pos){
+				$parsed['DOSTIGENIA']=substr($parsed['DOSTIGENIA'],$pos+strlen($delim)+1);
+				//print "\n dost pos=$pos<br>";
+			}
+		}
+		//отрезаем закрывающие теги всего раздела
+		if(isset($parsed['DOSTIGENIA']) && strlen($parsed['DOSTIGENIA'])){
+			$delim="</div>";
+			$pos=strripos($parsed['DOSTIGENIA'], $delim);
+			if($pos){
+				$parsed['DOSTIGENIA']=substr($parsed['DOSTIGENIA'],0,$pos);
+				//print "\n dost pos=$pos<br>";
+			}
+			$parsed['DOSTIGENIA']=trim($parsed['DOSTIGENIA']);
+		}
+	}
 	print_r($parsed);
 	print "<br>\n";
+	
+	return $parsed;
+}
+
+function db_update_parsed_doc_info($conn, $id, $doc_info){
+	if(!$conn || !$id || !$doc_info)
+		return;
+	
+	//$doc_info=array_map('sanitize_search_string',$doc_info);	//html tags here in db!
+	
+	$sql="update z_kiosk_doctors set \n";
+	
+	$n=false;
+	foreach($doc_info as $key=>$value){
+		if($n)
+			$sql.=',';
+		$sql.="$key = :$key \n";
+		$n=true;
+	}
+		
+	$sql.="where id=:id \n";
+	
+	//i don't remember columns names?
+	$r=array_merge($doc_info, array('id'=>$id));
+	
+	echo "sql=$sql";
+	print_r($r);
+	
+	try{
+		$stmt = $conn->prepare($sql);
+		$stmt -> execute($r);
+		//$rows=$stmt->fetchAll();
+	}
+	catch(PDOException $e) {
+		echo "FATAL:". $e->getMessage()."\n";
+	}
 }
 
 ?>
