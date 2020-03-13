@@ -105,6 +105,7 @@ $conn=db_connect($config);
 	echo '<a href="?rebuild_doctors">copy doctors from schedule</a><br><br>';
 	echo '<a href="?rebuild_kabinets">copy kabinets</a><br><br>';
 	echo '<a href="?scrap_docinfo">scrap_docinfo</a><br><br>';
+	echo '<a href="?reload_page_all">reload page on all kiosks</a><br><br>';
 
 print_r ($_REQUEST);
 echo '<br>';
@@ -190,7 +191,8 @@ else if (isset($_REQUEST['doctors'])){
 	$select_query=true;	
 }
 //-----------------------------
-else if (isset($_REQUEST['kabinets'])){
+else if (isset($_REQUEST['kabinets'])||
+		 isset($_REQUEST['reload_page_all'])){
 	$fields_array=array(
 		'ID'=>array(
 				"name"=>''
@@ -415,8 +417,14 @@ if($numRows>0)
 		$tabletype="kabinets";
 	else if (isset($_REQUEST['doctors']))
 		$tabletype="doctors";
+	else 
+		$tabletype="";
 	
-	process_table($rows, $tabletype, $fields_array);
+	if(strlen($tabletype))
+		process_table($rows, $tabletype, $fields_array);
+	
+	if(isset($_REQUEST['reload_page_all']))
+		reload_kiosk_all($rows);
 }
 
 if (isset($_REQUEST['kabinets'])){
@@ -530,6 +538,46 @@ function process_table($rows, $tabletype, $fields_array){
 	}
 	print '	</tbody>
 	</table>';
+}
+
+function reload_kiosk($host){
+	//echo ":APPURL http://kiosk/rasp2" | nc -u 192.168.7.46 41234
+	
+	$url="http://kiosk/rasp2";
+	$msg=":APPURL ".$url."\n";
+	$port=41234;
+	
+	$len = strlen($msg);
+	
+	$socket = socket_create(AF_INET, SOCK_DGRAM, SOL_UDP);
+	if ($socket === FALSE) {
+		echo ("Unable to create socket<br>\n");
+		return;
+	}
+	
+    $res=socket_sendto($socket, $msg, $len, 0, $host, $port);
+	if ($res === FALSE) {
+		echo ("Unable to establish session with port $port on $host<br>\n");
+	}
+    socket_close($socket);
+	if($res)
+		return 1;
+	else
+		return 0;
+}
+
+function reload_kiosk_all($rows){
+	$cnt=0;
+	foreach ($rows as $row){
+		$ip=$row['IPADDR'];
+		echo $ip."<br>";
+		if (filter_var($ip, FILTER_VALIDATE_IP)) {
+			$cnt+=reload_kiosk($ip);
+		} else {
+			echo("$ip is not a valid IP address"."<br>\n");
+		}
+	}
+	echo "sended $cnt <br>\n";
 }
 
 ?>
